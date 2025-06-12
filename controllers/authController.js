@@ -1,19 +1,23 @@
+const User = require('../models/user');
 const jwt = require('jsonwebtoken');
-const bcrypt = require('bcryptjs');
-const User = require('../models/User');
+
+const generateToken = (id) => {
+  return jwt.sign({ id }, process.env.JWT_SECRET, { expiresIn: '7d' });
+};
 
 exports.login = async (req, res) => {
-  const { email, password } = req.body;
-  try {
-    const user = await User.findOne({ email });
-    if (!user) return res.status(400).json({ message: 'User not found' });
+  const { email, password, timezone } = req.body;
+  const user = await User.findOne({ email });
 
-    const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) return res.status(400).json({ message: 'Invalid credentials' });
+  if (!user) return res.status(404).json({ msg: 'User not found' });
 
-    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: '7d' });
-    res.json({ token });
-  } catch (err) {
-    res.status(500).json({ message: 'Server error' });
-  }
+  const isMatch = await user.comparePassword(password);
+  if (!isMatch) return res.status(400).json({ msg: 'Invalid credentials' });
+
+  // (Optional) timezone validation can be added here.
+
+  res.json({
+    token: generateToken(user._id),
+    user: { id: user._id, name: user.name, role: user.role }
+  });
 };

@@ -1,18 +1,23 @@
-const express = require('express');
-const router = express.Router();
+const router = require('express').Router();
 const { protect } = require('../middleware/authMiddleware');
-const { allowRoles, validateRoleCreation } = require('../middleware/roleMiddleware');
-const {
-  createUser,
-  updateUserRole,
-  deleteUser,
-  listUsers,
-} = require('../controllers/userController');
+const { authorizeRoles } = require('../middleware/roleMiddleware');
+const userController = require('../controllers/userController');
 
-router.post('/', protect, validateRoleCreation, createUser);
-router.put('/:id', protect, allowRoles('SUPER_ADMIN', 'ADMIN'), updateUserRole);
-router.delete('/:id', protect, allowRoles('SUPER_ADMIN', 'ADMIN'), deleteUser);
-router.get('/', protect, listUsers);
+// Apply protect middleware on all routes
+//router.use(protect);
+
+// Create User
+router.post('/', userController.createUser);
+
+// List Users
+router.get('/', userController.listUsers);
+
+// Update User Role
+router.put('/:id', userController.updateUser);
+
+// Delete User
+router.delete('/:id', userController.deleteUser);
 
 module.exports = router;
+
 

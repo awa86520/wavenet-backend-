@@ -1,113 +1,101 @@
-const bcrypt = require('bcryptjs');
-const User = require('../models/User');
-const generateUserId = require('../utils/generateUserId');
+const User = require('../models/user');
 
+// Generate unique user IDs
+const generateUserId = async (role) => {
+  const prefix = role === 'ADMIN' ? 'A' : role === 'UNITMANAGER' ? 'UM' : 'U';
+  const count = await User.countDocuments({ role });
+  return `${prefix}${count + 1}`;
+};
+
+// Create User
 exports.createUser = async (req, res) => {
   try {
     const { name, email, role, password, group } = req.body;
-    const creatorRole = req.user.role;
 
-    // Role-based permission logic
-    if (
-      (creatorRole === 'SUPER_ADMIN' && role !== 'ADMIN') ||
-      (creatorRole === 'ADMIN' && role !== 'UNIT_MANAGER') ||
-      (creatorRole === 'UNIT_MANAGER' && role !== 'USER') ||
-      (creatorRole === 'USER')
-    ) {
-      return res.status(403).json({ message: 'Permission denied to create this role.' });
+    // Role based creation rules
+    if (req.user.role === 'SUPERADMIN' && role !== 'ADMIN') {
+      return res.status(400).json({ msg: 'Superadmin can only create Admin users' });
+    }
+    if (req.user.role === 'ADMIN' && role !== 'UNITMANAGER') {
+      return res.status(400).json({ msg: 'Admin can only create Unit Managers' });
+    }
+    if (req.user.role === 'UNITMANAGER' && role !== 'USER') {
+      return res.status(400).json({ msg: 'Unit Manager can only create Users' });
     }
 
-    const count = await User.countDocuments({ role });
-    const userId = generateUserId(role, count + 1);
-    const hashedPassword = await bcrypt.hash(password, 10);
-
-    const newUser = new User({
+    const userId = await generateUserId(role);
+    const newUser = await User.create({
+      userId,
       name,
       email,
-      password: hashedPassword,
       role,
-      userId,
-      group,
+      password,
       createdBy: req.user._id,
+      group: group || null
     });
-    await newUser.save();
+
     res.status(201).json(newUser);
   } catch (err) {
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ msg: err.message });
   }
 };
 
-exports.updateUserRole = async (req, res) => {
+// List Users (with role-based visibility)
+exports.listUsers = async (req, res) => {
   try {
-    const user = await User.findById(req.params.id);
-    if (!user) return res.status(404).json({ message: 'User not found' });
+    let query = {};
 
-    // Prevent unauthorized updates
-    if (
-      (req.user.role === 'ADMIN' && user.role !== 'UNIT_MANAGER') ||
-      (req.user.role === 'UNIT_MANAGER' && user.role !== 'USER') ||
-      req.user.role === 'USER'
-    ) {
-      return res.status(403).json({ message: 'Unauthorized to update this user' });
+    if (req.user.role === 'SUPERADMIN') {
+      query = {};
+    } else if (req.user.role === 'ADMIN') {
+      const adminsGroup = req.user.group;
+      if (adminsGroup) {
+        const admins = await User.find({ role: 'ADMIN', group: adminsGroup }).select('_id');
+        query = { createdBy: { $in: admins.map(a => a._id).concat(req.user._id) } };
+      } else {
+        query = { createdBy: req.user._id };
+      }
+    } else if (req.user.role === 'UNITMANAGER') {
+      const managersGroup = req.user.group;
+      if (managersGroup) {
+        const managers = await User.find({ role: 'UNITMANAGER', group: managersGroup }).select('_id');
+        query = { createdBy: { $in: managers.map(a => a._id).concat(req.user._id) } };
+      } else {
+        query = { createdBy: req.user._id };
+      }
+    } else {
+      return res.status(403).json({ msg: 'Unauthorized' });
     }
 
-    user.role = req.body.role;
+    const users = await User.find(query);
+    res.json(users);
+  } catch (err) {
+    res.status(500).json({ msg: err.message });
+  }
+};
+
+// Update User Role
+exports.updateUser = async (req, res) => {
+  try {
+    const { role } = req.body;
+    const user = await User.findById(req.params.id);
+    if (!user) return res.status(404).json({ msg: 'User not found' });
+
+    user.role = role;
     await user.save();
     res.json(user);
   } catch (err) {
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ msg: err.message });
   }
 };
 
+// Delete User
 exports.deleteUser = async (req, res) => {
   try {
-    const user = await User.findById(req.params.id);
-    if (!user) return res.status(404).json({ message: 'User not found' });
-
-    if (
-      (req.user.role === 'ADMIN' && user.role !== 'UNIT_MANAGER') ||
-      (req.user.role === 'UNIT_MANAGER' && user.role !== 'USER') ||
-      req.user.role === 'USER'
-    ) {
-      return res.status(403).json({ message: 'Unauthorized to delete this user' });
-    }
-
-    await user.remove();
-    res.json({ message: 'User deleted' });
+    await User.findByIdAndDelete(req.params.id);
+    res.json({ msg: 'User deleted' });
   } catch (err) {
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ msg: err.message });
   }
 };
 
-exports.listUsers = async (req, res) => {
-  try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 10;
-    const skip = (page - 1) * limit;
-
-    let query = {};
-    const { role, _id, group } = req.user;
-
-    if (role === 'SUPER_ADMIN') {
-      // See everyone
-      query = {};
-    } else if (role === 'ADMIN') {
-      query = {
-        $or: [
-          { createdBy: _id },
-          { createdBy: { $in: await User.find({ createdBy: _id }).distinct('_id') } }
-        ]
-      };
-    } else if (role === 'UNIT_MANAGER') {
-      const usersInGroup = await User.find({ group, role: 'UNIT_MANAGER' }).distinct('_id');
-      query = { createdBy: { $in: [...usersInGroup, _id] } };
-    } else if (role === 'USER') {
-      return res.status(403).json({ message: 'Users cannot list other users' });
-    }
-
-    const users = await User.find(query).skip(skip).limit(limit);
-    res.json(users);
-  } catch (err) {
-    res.status(500).json({ message: 'Server error' });
-  }
-};

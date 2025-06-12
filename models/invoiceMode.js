@@ -4,8 +4,8 @@ const invoiceSchema = new mongoose.Schema({
   invoiceNumber: Number,
   invoiceDate: Date,
   invoiceAmount: Number,
-  createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   financialYear: String,
-});
+  createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+}, { timestamps: true });
 
 module.exports = mongoose.model('Invoice', invoiceSchema);
